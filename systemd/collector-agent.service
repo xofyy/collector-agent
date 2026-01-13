@@ -1,7 +1,7 @@
 [Unit]
 Description=Metric Collector Agent
 Documentation=https://github.com/collector-agent
-After=network.target docker.service node_exporter.service nvidia-dcgm.service
+After=network.target node_exporter.service
 Wants=node_exporter.service
 
 [Service]

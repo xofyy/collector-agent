@@ -1,32 +1,66 @@
 # Collector Agent
 
-Ubuntu 22.04 LTS üzerinde Node Exporter ve nvidia-smi'den sistem metriklerini toplayıp yerel Docker endpoint'ine gönderen Python CLI tabanlı bir agent.
+Ubuntu 22.04 LTS üzerinde Node Exporter ve nvidia-smi'den sistem metriklerini toplayıp belirlenen endpoint'e gönderen Python CLI tabanlı metrik toplama ajanı.
 
 ## Özellikler
 
-- CPU kullanımı, load average ve sıcaklık
-- RAM kullanımı
-- Disk kullanımı (tüm mount point'ler)
-- NVIDIA GPU kullanımı, bellek ve sıcaklık (nvidia-smi ile)
-- CLI ile anlık metrik görüntüleme
-- Daemon modu ile arka planda çalışma
-- Systemd entegrasyonu
+- **CPU**: Kullanım yüzdesi, load average, çekirdek sayısı, sıcaklık
+- **RAM**: Toplam, kullanılan, kullanılabilir bellek
+- **Disk**: Tüm mount point'ler için kullanım bilgisi
+- **GPU**: NVIDIA GPU kullanımı, bellek, sıcaklık, güç tüketimi (nvidia-smi ile)
+- **CLI**: Anlık metrik görüntüleme ve canlı izleme (`-f` flag)
+- **Daemon**: Arka planda çalışma modu
+- **Systemd**: Otomatik başlatma entegrasyonu
 
 ## Gereksinimler
 
 - Ubuntu 22.04 LTS
 - Python 3.10+
 - Node Exporter (port 9100)
-- NVIDIA Driver (nvidia-smi için, opsiyonel)
+- NVIDIA Driver (GPU metrikleri için, opsiyonel)
 
 ## Kurulum
 
+### GitHub'dan İndirme
+
 ```bash
-# Node Exporter kur ve nvidia-smi kontrolü yap
+# Repoyu klonla
+git clone https://github.com/xofyy/collector-agent.git
+cd collector-agent
+
+# Veya zip olarak indir
+wget https://github.com/xofyy/collector-agent/archive/main.zip
+unzip main.zip
+cd collector-agent-main
+```
+
+### Kurulum Adımları
+
+```bash
+# 1. Node Exporter kur ve nvidia-smi kontrolü yap
 sudo ./scripts/setup-exporters.sh
 
-# Agent'ı kur
+# 2. Agent'ı kur (otomatik başlatır)
 sudo ./scripts/install.sh
+```
+
+### Kurulum Seçenekleri
+
+```bash
+# Normal kurulum (otomatik başlatır)
+sudo ./scripts/install.sh
+
+# Başlatmadan kur
+sudo ./scripts/install.sh --no-start
+
+# Mevcut kurulumu kaldır
+sudo ./scripts/install.sh --uninstall
+
+# Zorla yeniden kur (config'i sıfırlar)
+sudo ./scripts/install.sh --force
+
+# Yardım
+./scripts/install.sh --help
 ```
 
 ## Kullanım
@@ -34,6 +68,9 @@ sudo ./scripts/install.sh
 ### Servis Kontrolü
 
 ```bash
+# Servis durumunu göster
+collector status
+
 # Foreground'da başlat
 collector start
 
@@ -42,9 +79,6 @@ collector start --daemon
 
 # Daemon'ı durdur
 collector stop
-
-# Servis durumu
-collector status
 ```
 
 ### Metrik Görüntüleme
@@ -53,42 +87,55 @@ collector status
 # Tüm metrikleri göster
 collector metrics
 
-# Kategori bazlı
+# Canlı izleme (her 2 saniyede güncelle)
+collector metrics -f
+
+# Canlı izleme (özel interval)
+collector metrics -f -i 5
+
+# Kategori bazlı görüntüleme
 collector metrics cpu
 collector metrics gpu
 collector metrics ram
 collector metrics disk
+collector metrics temp
 ```
 
 ### Konfigürasyon
 
 ```bash
-# Mevcut config'i göster
+# Mevcut ayarları göster
 collector config show
 
 # Endpoint ayarla
-collector config set endpoint http://localhost:8080/metrics
+sudo collector config set endpoint http://localhost:8080/metrics
 
-# Interval ayarla (saniye)
-collector config set interval 30
+# Veri toplama aralığını ayarla (saniye)
+sudo collector config set interval 30
+
+# GPU metriklerini kapat
+sudo collector config set exporters.nvidia_smi.enabled false
+
+# Varsayılana sıfırla
+sudo collector config reset
 ```
 
 ### Test
 
 ```bash
-# Endpoint'e test isteği gönder
+# Endpoint bağlantısını test et
 collector test
 
-# Sadece JSON çıktısını göster, gönderme
+# Sadece JSON çıktısını göster (göndermeden)
 collector test --dry-run
 ```
 
-## Konfigürasyon
+## Konfigürasyon Dosyası
 
-Config dosyası: `/etc/collector-agent/config.yaml`
+Konum: `/etc/collector-agent/config.yaml`
 
 ```yaml
-endpoint: http://localhost:8080/metrics
+endpoint: https://webhook-test.com/c4da883ab9f9086a6dbabbee56704e44
 interval: 30
 
 exporters:
@@ -98,7 +145,7 @@ exporters:
     timeout: 5
   nvidia_smi:
     enabled: true
-    nvidia_smi_path: null  # Auto-detect
+    nvidia_smi_path: null  # Otomatik algıla
 
 logging:
   level: INFO
@@ -108,31 +155,33 @@ daemon:
   pid_file: /var/run/collector-agent.pid
 ```
 
-## GPU Metrikleri
-
-GPU metrikleri `nvidia-smi` komutu kullanılarak toplanır. Bu yöntem:
-
-- Tüm NVIDIA GPU'ları destekler (GeForce, Quadro, Tesla, RTX)
-- Ek servis kurulumu gerektirmez
-- NVIDIA driver kurulu olması yeterlidir
-
-nvidia-smi bulunamazsa GPU metrikleri atlanır, diğer metrikler toplanmaya devam eder.
-
-## Systemd
+## Systemd Yönetimi
 
 ```bash
-# Servisi başlat
-sudo systemctl start collector-agent
-
-# Otomatik başlatmayı etkinleştir
-sudo systemctl enable collector-agent
-
-# Durumu kontrol et
+# Servis durumu
 sudo systemctl status collector-agent
+
+# Servisi başlat/durdur/yeniden başlat
+sudo systemctl start collector-agent
+sudo systemctl stop collector-agent
+sudo systemctl restart collector-agent
+
+# Otomatik başlatmayı etkinleştir/devre dışı bırak
+sudo systemctl enable collector-agent
+sudo systemctl disable collector-agent
 
 # Logları görüntüle
 sudo journalctl -u collector-agent -f
 ```
+
+## GPU Metrikleri
+
+GPU metrikleri `nvidia-smi` komutu ile toplanır:
+
+- Tüm NVIDIA GPU'ları destekler (GeForce, Quadro, Tesla, RTX)
+- Ek servis kurulumu gerektirmez
+- NVIDIA driver kurulu olması yeterlidir
+- nvidia-smi bulunamazsa GPU metrikleri atlanır, diğer metrikler toplanmaya devam eder
 
 ## JSON Çıktı Formatı
 
@@ -171,6 +220,18 @@ sudo journalctl -u collector-agent -f
         "power_watts": 120.5
     }
 }
+```
+
+## Hızlı Başlangıç (Tek Satır)
+
+```bash
+git clone https://github.com/your-username/collector-agent.git && cd collector-agent && sudo ./scripts/setup-exporters.sh && sudo ./scripts/install.sh
+```
+
+## Kaldırma
+
+```bash
+sudo ./scripts/install.sh --uninstall --force
 ```
 
 ## Lisans
