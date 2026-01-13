@@ -1,0 +1,31 @@
+[Unit]
+Description=Metric Collector Agent
+Documentation=https://github.com/collector-agent
+After=network.target docker.service node_exporter.service nvidia-dcgm.service
+Wants=node_exporter.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/collector start
+ExecStop=/usr/local/bin/collector stop
+Restart=always
+RestartSec=10
+
+# Run as root to access /var/run and /var/log
+User=root
+Group=root
+
+# Logging
+StandardOutput=append:/var/log/collector-agent.log
+StandardError=append:/var/log/collector-agent.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/collector-agent.log /var/run /etc/collector-agent
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

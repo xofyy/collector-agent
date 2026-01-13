@@ -1,0 +1,18 @@
+endpoint: http://localhost:8080/metrics
+interval: 30
+
+exporters:
+  node_exporter:
+    enabled: true
+    url: http://localhost:9100/metrics
+    timeout: 5
+  nvidia_smi:
+    enabled: true
+    nvidia_smi_path: null  # Auto-detect (usually /usr/bin/nvidia-smi)
+
+logging:
+  level: INFO
+  file: /var/log/collector-agent.log
+
+daemon:
+  pid_file: /var/run/collector-agent.pid
