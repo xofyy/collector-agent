@@ -15,9 +15,8 @@ dependencies = [
 collector = "collector.cli:app"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel", "tomli; python_version < '3.11'"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["collector*"]
+[tool.setuptools]
+packages = ["netmon"]
