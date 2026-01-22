@@ -1,12 +1,16 @@
 """Daemon management for Collector Agent."""
 
+import logging
 import os
 import signal
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class DaemonManager:
@@ -53,49 +57,111 @@ class DaemonManager:
         return self.get_pid() is not None
     
     def write_pid(self) -> None:
-        """Write current PID to PID file."""
+        """Write current PID to PID file atomically."""
         self.pid_file.parent.mkdir(parents=True, exist_ok=True)
-        self.pid_file.write_text(str(os.getpid()))
-        self._start_time = datetime.now()
+
+        # Write to temp file in same directory, then rename (atomic on POSIX)
+        fd, temp_path = tempfile.mkstemp(
+            dir=self.pid_file.parent,
+            prefix=".pid_",
+            suffix=".tmp"
+        )
+        try:
+            os.write(fd, f"{os.getpid()}\n".encode())
+            os.close(fd)
+            os.rename(temp_path, self.pid_file)
+            self._start_time = datetime.now()
+        except Exception:
+            os.close(fd)
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
     
     def _cleanup_pid_file(self) -> None:
         """Remove stale PID file."""
         try:
             self.pid_file.unlink(missing_ok=True)
         except PermissionError:
-            pass
+            logger.warning(f"Permission denied removing PID file: {self.pid_file}")
     
+    def _get_process_start_time(self, pid: int) -> Optional[datetime]:
+        """Get process start time from /proc.
+
+        Args:
+            pid: Process ID
+
+        Returns:
+            datetime of process start or None
+
+        Raises:
+            FileNotFoundError: If proc files don't exist
+            PermissionError: If cannot read proc files
+            ValueError: If cannot parse proc files
+        """
+        # Get system boot time from /proc/stat
+        boot_time = None
+        stat_path = Path("/proc/stat")
+        with open(stat_path, "r") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    boot_time = int(line.split()[1])
+                    break
+
+        if boot_time is None:
+            raise ValueError("Could not find btime in /proc/stat")
+
+        # Get process start time (field 22) from /proc/{pid}/stat
+        proc_stat_path = Path(f"/proc/{pid}/stat")
+        with open(proc_stat_path, "r") as f:
+            content = f.read()
+
+        # Parse stat file - field 22 is starttime (after the comm field in parentheses)
+        # Format: pid (comm) state ... field22 ...
+        # Find the closing paren to skip the command name (which may contain spaces)
+        close_paren = content.rfind(")")
+        if close_paren == -1:
+            raise ValueError(f"Invalid /proc/{pid}/stat format")
+
+        fields = content[close_paren + 2:].split()
+        # starttime is field 22 (1-indexed), but after comm/state it's index 19 (0-indexed)
+        # fields[0] is state, so starttime is fields[19]
+        starttime_ticks = int(fields[19])
+
+        # Convert ticks to seconds (SC_CLK_TCK is typically 100 on Linux)
+        clock_ticks = os.sysconf("SC_CLK_TCK")
+        starttime_seconds = boot_time + (starttime_ticks / clock_ticks)
+
+        return datetime.fromtimestamp(starttime_seconds)
+
     def get_uptime(self) -> Optional[str]:
         """Get daemon uptime as a formatted string.
-        
+
         Returns:
             Uptime string or None if not running
         """
         if not self.is_running():
             return None
-        
+
         if self._start_time is None:
             # Try to get start time from /proc
             pid = self.get_pid()
             if pid:
                 try:
-                    stat_file = Path(f"/proc/{pid}/stat")
-                    if stat_file.exists():
-                        # Use process start time from /proc
-                        create_time = os.path.getctime(f"/proc/{pid}")
-                        self._start_time = datetime.fromtimestamp(create_time)
-                except Exception:
-                    pass
-        
+                    self._start_time = self._get_process_start_time(pid)
+                except (FileNotFoundError, PermissionError, ValueError) as e:
+                    logger.debug(f"Could not get process start time: {e}")
+
         if self._start_time is None:
             return "unknown"
-        
+
         delta = datetime.now() - self._start_time
         total_seconds = int(delta.total_seconds())
-        
+
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-        
+
         if hours > 0:
             return f"{hours}h {minutes}m {seconds}s"
         elif minutes > 0:

@@ -1,11 +1,14 @@
 """Configuration management for Collector Agent."""
 
-import os
+import logging
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 # Config file paths
@@ -16,10 +19,19 @@ DEFAULT_CONFIG_FILE = Path(__file__).parent.parent / "config.default.yaml"
 
 class NodeExporterConfig(BaseModel):
     """Configuration for Node Exporter."""
-    
+
     enabled: bool = True
     url: str = "http://localhost:9100/metrics"
-    timeout: int = 5
+    timeout: int = Field(default=5, ge=1, le=300)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        """Validate URL format."""
+        pattern = r'^https?://[^\s/$.?#].[^\s]*$'
+        if not re.match(pattern, v):
+            raise ValueError(f"Invalid URL format: {v}")
+        return v
 
 
 class NvidiaSmiConfig(BaseModel):
@@ -38,25 +50,54 @@ class ExportersConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     """Logging configuration."""
-    
+
     level: str = "INFO"
     file: str = "/var/log/collector-agent.log"
+
+    @field_validator("level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level."""
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper_v = v.upper()
+        if upper_v not in valid_levels:
+            raise ValueError(
+                f"Invalid log level: {v}. Must be one of: {', '.join(sorted(valid_levels))}"
+            )
+        return upper_v
 
 
 class DaemonConfig(BaseModel):
     """Daemon configuration."""
-    
+
     pid_file: str = "/var/run/collector-agent.pid"
+
+    @field_validator("pid_file")
+    @classmethod
+    def validate_pid_file(cls, v: str) -> str:
+        """Validate PID file path is absolute."""
+        if not v or not v.startswith("/"):
+            raise ValueError(f"PID file must be an absolute path: {v}")
+        return v
 
 
 class Config(BaseModel):
     """Main configuration model."""
-    
+
     endpoint: str = "http://localhost:8080/metrics"
-    interval: int = 30
+    interval: int = Field(default=30, ge=1, le=3600)
     exporters: ExportersConfig = Field(default_factory=ExportersConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, v: str) -> str:
+        """Validate endpoint URL format."""
+        pattern = r'^https?://[^\s/$.?#].[^\s]*$'
+        if not re.match(pattern, v):
+            raise ValueError(f"Invalid endpoint URL format: {v}")
+        return v
 
 
 def get_default_config() -> Config:
@@ -66,24 +107,35 @@ def get_default_config() -> Config:
 
 def load_config(config_path: Optional[Path] = None) -> Config:
     """Load configuration from YAML file.
-    
+
     Args:
         config_path: Path to config file. Defaults to /etc/collector-agent/config.yaml
-        
+
     Returns:
         Config object
     """
     if config_path is None:
         config_path = CONFIG_FILE
-    
+
     if not config_path.exists():
+        logger.debug(f"Config file not found at {config_path}, using defaults")
         return get_default_config()
-    
+
     try:
         with open(config_path, "r") as f:
             data = yaml.safe_load(f) or {}
         return Config(**data)
-    except Exception:
+    except yaml.YAMLError as e:
+        logger.warning(f"Invalid YAML in config file {config_path}: {e}. Using defaults.")
+        return get_default_config()
+    except ValidationError as e:
+        logger.warning(f"Invalid configuration in {config_path}: {e}. Using defaults.")
+        return get_default_config()
+    except PermissionError:
+        logger.warning(f"Permission denied reading config file {config_path}. Using defaults.")
+        return get_default_config()
+    except Exception as e:
+        logger.warning(f"Error loading config from {config_path}: {e}. Using defaults.")
         return get_default_config()
 
 

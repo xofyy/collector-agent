@@ -135,7 +135,7 @@ collector test --dry-run
 Konum: `/etc/collector-agent/config.yaml`
 
 ```yaml
-endpoint: https://webhook-test.com/c4da883ab9f9086a6dbabbee56704e44
+endpoint: http://localhost:8080/metrics
 interval: 30
 
 exporters:
@@ -222,10 +222,82 @@ GPU metrikleri `nvidia-smi` komutu ile toplanır:
 }
 ```
 
+## Dosya Konumları
+
+| Dosya | Açıklama |
+|-------|----------|
+| `/etc/collector-agent/config.yaml` | Konfigürasyon dosyası |
+| `/var/log/collector-agent.log` | Uygulama logları |
+| `/var/run/collector-agent.pid` | Daemon PID dosyası |
+| `/var/lib/collector-agent/backups/` | Güncelleme backupları |
+| `/etc/systemd/system/collector-agent.service` | Systemd servis dosyası |
+| `/etc/logrotate.d/collector-agent` | Log rotasyon ayarları |
+
 ## Hızlı Başlangıç (Tek Satır)
 
 ```bash
-git clone https://github.com/your-username/collector-agent.git && cd collector-agent && sudo ./scripts/setup-exporters.sh && sudo ./scripts/install.sh
+git clone https://github.com/xofyy/collector-agent.git && cd collector-agent && sudo ./scripts/setup-exporters.sh && sudo ./scripts/install.sh
+```
+
+## Güncelleme
+
+Yeni versiyon yayınlandığında ajanı güncellemek için:
+
+```bash
+# Repoyu güncelle
+cd collector-agent
+git pull origin main
+
+# Güncelleme scriptini çalıştır
+sudo ./scripts/update.sh
+```
+
+### Güncelleme Seçenekleri
+
+```bash
+# Normal güncelleme
+sudo ./scripts/update.sh
+
+# Backup ile güncelleme (önerilen)
+sudo ./scripts/update.sh --backup
+
+# Servisi yeniden başlatmadan güncelle
+sudo ./scripts/update.sh --no-restart
+
+# Zorla güncelle (aynı versiyon bile olsa)
+sudo ./scripts/update.sh --force
+
+# Önceki versiyona geri dön
+sudo ./scripts/update.sh --rollback
+```
+
+### Backup ve Geri Yükleme
+
+Backup dosyaları `/var/lib/collector-agent/backups/` dizininde saklanır:
+- `config.yaml.YYYYMMDD_HHMMSS` - Konfigürasyon yedeği
+- `collector-agent.YYYYMMDD_HHMMSS.whl` - Eski versiyon paketi
+
+```bash
+# Mevcut backupları listele
+ls -la /var/lib/collector-agent/backups/
+
+# Manuel geri yükleme
+sudo ./scripts/update.sh --rollback
+```
+
+## Log Rotasyonu
+
+Loglar otomatik olarak döndürülür (`/etc/logrotate.d/collector-agent`):
+- Günlük rotasyon
+- 7 günlük log saklanır
+- 100MB üzeri dosyalar sıkıştırılır
+
+```bash
+# Logrotate durumunu kontrol et
+cat /var/lib/logrotate/status | grep collector
+
+# Manuel rotasyon (test için)
+sudo logrotate -f /etc/logrotate.d/collector-agent
 ```
 
 ## Kaldırma

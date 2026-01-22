@@ -1,11 +1,14 @@
 """Base exporter class."""
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 import httpx
 
 from collector.parser import ParsedMetrics, parse_prometheus_text
+
+logger = logging.getLogger(__name__)
 
 
 class BaseExporter(ABC):
@@ -31,7 +34,7 @@ class BaseExporter(ABC):
     
     def scrape(self) -> Optional[ParsedMetrics]:
         """Scrape metrics from the exporter.
-        
+
         Returns:
             ParsedMetrics if successful, None if failed
         """
@@ -39,19 +42,32 @@ class BaseExporter(ABC):
             response = self.client.get(self.url)
             response.raise_for_status()
             return parse_prometheus_text(response.text)
-        except Exception:
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"HTTP error scraping {self.url}: {e.response.status_code}")
             return None
-    
+        except httpx.RequestError as e:
+            logger.warning(f"Request error scraping {self.url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error scraping {self.url}: {e}")
+            return None
+
     def is_available(self) -> bool:
         """Check if exporter is available.
-        
+
         Returns:
             True if exporter is reachable
         """
         try:
             response = self.client.get(self.url)
             return response.status_code == 200
-        except Exception:
+        except httpx.HTTPStatusError:
+            return False
+        except httpx.RequestError as e:
+            logger.debug(f"Exporter {self.url} not available: {e}")
+            return False
+        except Exception as e:
+            logger.debug(f"Unexpected error checking {self.url}: {e}")
             return False
     
     @abstractmethod

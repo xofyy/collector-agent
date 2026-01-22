@@ -17,6 +17,8 @@ readonly CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 readonly LOG_FILE="/var/log/collector-agent.log"
 readonly PID_FILE="/var/run/collector-agent.pid"
 readonly SERVICE_FILE="/etc/systemd/system/collector-agent.service"
+readonly LOGROTATE_FILE="/etc/logrotate.d/collector-agent"
+readonly BACKUP_DIR="/var/lib/collector-agent/backups"
 readonly PACKAGE_NAME="collector-agent"
 
 # Options
@@ -173,15 +175,32 @@ do_uninstall() {
         fi
     fi
     
+    # Remove logrotate config
+    if [[ -f "$LOGROTATE_FILE" ]]; then
+        echo_step "Removing logrotate configuration..."
+        rm -f "$LOGROTATE_FILE"
+    fi
+
     # Remove log and PID files
     echo_step "Removing runtime files..."
     rm -f "$LOG_FILE" "$PID_FILE" 2>/dev/null || true
-    
+
+    # Remove backup directory (ask first unless --force)
+    if [[ -d "$BACKUP_DIR" ]]; then
+        if [[ "$OPT_FORCE" == "true" ]]; then
+            echo_step "Removing backup directory..."
+            rm -rf "$BACKUP_DIR"
+        else
+            echo_warn "Backup directory exists: $BACKUP_DIR"
+            echo_warn "Use --force to remove it, or remove manually"
+        fi
+    fi
+
     echo ""
     echo_info "=========================================="
     echo_info "Uninstallation completed!"
     echo_info "=========================================="
-    
+
     exit 0
 }
 
@@ -272,12 +291,50 @@ setup_config() {
 
 setup_logging() {
     echo_step "Setting up logging..."
-    
+
     mkdir -p "$(dirname "$LOG_FILE")"
     touch "$LOG_FILE"
     chmod 644 "$LOG_FILE"
-    
+
     mkdir -p "$(dirname "$PID_FILE")"
+}
+
+setup_logrotate() {
+    echo_step "Setting up log rotation..."
+
+    local logrotate_src="$PROJECT_DIR/systemd/collector-agent.logrotate"
+
+    if [[ -f "$logrotate_src" ]]; then
+        cp "$logrotate_src" "$LOGROTATE_FILE"
+        chmod 644 "$LOGROTATE_FILE"
+        echo_info "Logrotate configured: $LOGROTATE_FILE"
+    else
+        # Create default logrotate config if source doesn't exist
+        cat > "$LOGROTATE_FILE" << 'EOF'
+/var/log/collector-agent.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    copytruncate
+    size 100M
+}
+EOF
+        chmod 644 "$LOGROTATE_FILE"
+        echo_info "Logrotate configured (default): $LOGROTATE_FILE"
+    fi
+}
+
+setup_backup_dir() {
+    echo_step "Setting up backup directory..."
+
+    mkdir -p "$BACKUP_DIR"
+    chmod 755 "$BACKUP_DIR"
+
+    echo_info "Backup directory created: $BACKUP_DIR"
 }
 
 setup_systemd() {
@@ -402,6 +459,7 @@ show_summary() {
     echo ""
     echo "Configuration: $CONFIG_FILE"
     echo "Log file:      $LOG_FILE"
+    echo "Backup dir:    $BACKUP_DIR"
     echo ""
     echo "Commands:"
     echo "  collector status          - Check status"
@@ -412,6 +470,10 @@ show_summary() {
     echo "Systemd:"
     echo "  sudo systemctl status collector-agent"
     echo "  sudo systemctl restart collector-agent"
+    echo ""
+    echo "Updates:"
+    echo "  sudo $SCRIPT_DIR/update.sh           - Update to latest version"
+    echo "  sudo $SCRIPT_DIR/update.sh --backup  - Update with backup"
     echo ""
 }
 
@@ -437,6 +499,8 @@ main() {
     install_package
     setup_config
     setup_logging
+    setup_logrotate
+    setup_backup_dir
     setup_systemd
     start_service
     verify_installation

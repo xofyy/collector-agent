@@ -1,0 +1,29 @@
+# Logrotate configuration for Collector Agent
+# Install to: /etc/logrotate.d/collector-agent
+
+/var/log/collector-agent.log {
+    # Rotate daily
+    daily
+
+    # Keep 7 days of logs
+    rotate 7
+
+    # Compress old logs
+    compress
+    delaycompress
+
+    # Don't fail if log is missing
+    missingok
+
+    # Don't rotate empty logs
+    notifempty
+
+    # Create new log with same permissions
+    create 0644 root root
+
+    # Truncate original file (for running service)
+    copytruncate
+
+    # Size limit (rotate if larger than 100M even if not daily)
+    size 100M
+}
